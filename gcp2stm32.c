@@ -28,6 +28,7 @@ volatile unsigned int adc_buffer1[1000];
 
 volatile unsigned int ledcounter=0;
 volatile unsigned int whiteport=0;
+volatile unsigned int whitebyte=0;
 
 /* My clock setup structure */
 /* 64MHz using 8MHz External Xtal */
@@ -52,11 +53,22 @@ const struct rcc_clock_scale my_clock_config = {
 /* Every .1mS */
 void tim2_isr(void)
 {
+    /* Read bits from port B */
     whiteport=gpio_port_read(GPIOB);
+
+    /* XOR Bits */
+    whiteport ^=(whiteport>>1);
+
+    /* Copy XOR'd bits into whitebyte in the correct order */
+    /* Low Nibble = 0bDCBA */
+    whitebyte=  ((whiteport & 0x4000) >> 12) |  /* C */
+                ((whiteport & 0x1000) >> 12) |  /* A */
+                ((whiteport & 0x0400) >> 9)  |  /* B */
+                ((whiteport & 0x0100) >> 5);    /* D */
 
     if(ledcounter++>500)    
     {
-        if(whiteport & 0x0100)
+        if(whitebyte & 0x1)
             gpio_set(LED_PORT,LED_PIN);
         else
             gpio_clear(LED_PORT,LED_PIN);
@@ -163,7 +175,7 @@ int main(void)
     adc_buffer1[203]=6;
 
     /* Wait for power to settle down */
-    delay_ms(50);
+    delay_ms(250);
 
     /* Set up clocks and GPIO */
     clock_gpio_setup();

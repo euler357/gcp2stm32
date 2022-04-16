@@ -22,7 +22,7 @@ CFLAGS += -I$(LIBOPENPCMROOT)/include -c -DSTM32G0
  
 LDFLAGS = --static -nostartfiles -mthumb -mcpu=cortex-m0plus -msoft-float -Wl,-Map=ResearchRNG.map 
 LDFLAGS += -Wl,--gc-sections -specs=nosys.specs -Wl,--start-group -lc -lgcc -lnosys -Wl,--end-group 
-LDFLAGS += -T$(LINKERFILE) -L../libopencm3/lib 
+LDFLAGS += -T$(LINKERFILE) -L../libopencm3/lib  
 
 default: $(TARGET).bin 
 

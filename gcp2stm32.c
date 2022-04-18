@@ -1,3 +1,9 @@
+/********************************
+* GCP 2.0 STM32G030 Firmware    *
+* April 2022                    *
+* Chris K Cockrum               *
+* https://accuforge.com         *
+********************************/
 
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
@@ -28,12 +34,32 @@
 #define SYNC_PORT   GPIOA
 #define SYNC_PIN    GPIO11
 
-volatile unsigned int adc_buffer0[256];
-volatile unsigned int adc_buffer1[256];
+/* I2C LM75A */
+#define TEMP_PORT   GPIOB
+#define TEMP_SDA    GPIO0
+#define TEMP_SCL    GPIO1
+
+/* I2C Stuff */
+#define SCL0    gpio_clear(TEMP_PORT,TEMP_SCL)
+#define SCL1    gpio_set(TEMP_PORT,TEMP_SCL)
+#define SDA0    gpio_clear(TEMP_PORT,TEMP_SDA)
+#define SDA1    gpio_set(TEMP_PORT,TEMP_SDA)
+#define CLK_DELAY   15
+#define SEND_ZERO   SCL0;SDA0;CLK_DELAY;SCL1;CLK_DELAY;
+#define SEND_ONE    SCL0;SDA1;CLK_DELAY;SCL1;CLK_DELAY;
+#define SEND_CLK    SCL0;CLK_DELAY;SCL1;CLK_DELAY;
+
+/* Current Temperature */
+unsigned int current_temp=0;
+
+volatile unsigned char adc_buffer0[256];
+volatile unsigned char adc_buffer1[256];
 
 volatile unsigned int ledcounter=0;
 volatile unsigned int whiteport=0;
 volatile unsigned int whitebyte=0;
+
+volatile unsigned int second_trigger=0;
 
 /* My clock setup structure */
 /* 64MHz using 8MHz External Xtal */
@@ -53,6 +79,107 @@ const struct rcc_clock_scale my_clock_config = {
     .ahb_frequency = 64000000,
     .apb_frequency = 64000000
 };
+
+unsigned int i2c_send_byte(unsigned int sendbyte)
+{
+    unsigned int tempbyte;
+    tempbyte=sendbyte;
+
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TEMP_SDA);
+    delay(CLK_DELAY);
+    SCL0;
+    delay(CLK_DELAY);
+
+    for(int k=0;k<8;k++)
+    {
+        if(tempbyte & 0x80)
+        {
+            SDA1;
+            delay(CLK_DELAY);
+            SCL1;
+            delay(CLK_DELAY);
+            SCL0;
+            delay(CLK_DELAY);
+        }
+        else
+        {
+            SDA0;
+            delay(CLK_DELAY);
+            SCL1;
+            delay(CLK_DELAY);
+            SCL0;
+            delay(CLK_DELAY);
+        }
+        tempbyte<<=1;
+    }
+
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SDA);
+    SCL1;
+    delay(CLK_DELAY);
+    tempbyte=gpio_port_read(TEMP_PORT);
+    SCL0;
+    delay(CLK_DELAY);
+    
+    return (tempbyte &0x20)==0x20;
+}
+
+unsigned int i2c_receive_byte(void)
+{
+    unsigned int tempbyte;
+    tempbyte=0;
+
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SDA);
+    for(int k=0;k<8;k++)
+    {
+
+        delay(CLK_DELAY);
+        SCL1;delay(CLK_DELAY);
+        tempbyte<<=1;
+        if((gpio_port_read(TEMP_PORT)&0x20)==0x20)
+            tempbyte=1;
+        else
+            tempbyte=0;
+        SCL0;
+
+        delay(CLK_DELAY);
+    }
+
+    /* Send ACK */
+    SDA0;
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TEMP_SDA);
+    SCL1;
+    delay(CLK_DELAY);
+    tempbyte=gpio_port_read(TEMP_PORT);
+    SCL0;
+    delay(CLK_DELAY);
+    
+    return tempbyte;
+}
+
+void read_temp(void)
+{
+    volatile unsigned int tempvar=0;
+
+    /* Set SCL, SDA to outputs */
+    SCL1;SDA1;
+    delay(CLK_DELAY);;
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TEMP_SCL | TEMP_SDA);
+    SDA0;
+    
+    i2c_send_byte(145);
+    tempvar=i2c_receive_byte();
+    tempvar=i2c_receive_byte();
+    
+    delay(CLK_DELAY);
+    SDA0;delay(CLK_DELAY);;
+    SCL1;delay(CLK_DELAY);;
+    SDA1;delay(CLK_DELAY);;
+    /* Set SCL, SDA to float */
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SCL | TEMP_SDA);
+
+    /* Write read temperature to global variable */
+    current_temp=tempvar;
+}
 
 /* Timer 2 ISR */
 /* Every .1mS */
@@ -107,7 +234,8 @@ static void clock_gpio_setup(void)
                      GPIO10 | GPIO11 | GPIO12 | GPIO13 | GPIO14 | GPIO15);
     gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_PIN);
     gpio_mode_setup(USART_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, USART_TXPIN);
-    
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SCL | TEMP_SDA);
+
     /* Setup USART TX pin as alternate function. */
     gpio_set_af(USART_PORT, GPIO_AF1, USART_TXPIN);
 
@@ -172,7 +300,7 @@ static void usart_print_string(char *str)
 void exti4_15_isr(void)
 {
     exti_reset_request(EXTI11);
-    gpio_toggle(LED_PORT,LED_PIN);
+    second_trigger=1;
 }
 
 /* Set up interrupt and exti for Sync Pulse */
@@ -198,7 +326,7 @@ int main(void)
     adc_buffer1[203]=6;
 
     /* Wait for power to settle down */
-    delay_ms(250);
+    delay_ms(50);
 
     clock_gpio_setup();
     adc_setup();
@@ -208,13 +336,18 @@ int main(void)
 
     while(1)
 	{
-    	delay_ms(1000);
+        if(second_trigger)
+        {
+            second_trigger=0;
+    	    gpio_toggle(LED_PORT,LED_PIN);
 
-        if(m>=10)
-            m=0;
+            if(m>=10)
+                m=0;
 
-        usart_send_blocking(USART1, m++ + 0x30); /* USART1: Send byte. */
-        usart_print_string((char*)tempstr);
+            usart_send_blocking(USART1, m++ + 0x30); /* USART1: Send byte. */
+            usart_print_string((char*)tempstr);
+            read_temp();
+        }
  	}
 
 	return 0;

@@ -50,7 +50,19 @@
 #define SEND_ONE    SCL0;SDA1;CLK_DELAY;SCL1;CLK_DELAY;
 #define SEND_CLK    SCL0;CLK_DELAY;SCL1;CLK_DELAY;
 
+/* For Interrupt vs sample number testing */
 unsigned int templimit=0;
+
+/* Median Calculation Stuff */
+#define RANGE       4096
+#define FREQ_WINDOW 1024
+#define MEDIAN_MAX (RANGE+FREQ_WINDOW)/2-1
+#define MEDIAN_MIN (RANGE/2)-(FREQ_WINDOW/2)
+
+/* Frequency arrays for Median Calculation */
+uint16_t stream0_freq[FREQ_WINDOW];
+uint16_t stream1_freq[FREQ_WINDOW];
+
 /* ADC Stuff */
 uint8_t channel_array[8] = { 0,1,2,3,4,5,6,7 };
 
@@ -79,8 +91,10 @@ const unsigned int bin_to_eighths[8][3] = { \
 unsigned int current_temp=0;
 
 /* ADC Buffers */
-volatile unsigned char adc_buffer0[256];
-volatile unsigned char adc_buffer1[256];
+volatile uint16_t adc_buffer0[200];
+volatile uint16_t adc_buffer1[200];
+volatile unsigned int adc_buffer_ptr=0;
+
 
 volatile unsigned int ledcounter=0;
 volatile unsigned int whiteport=0;
@@ -93,7 +107,9 @@ volatile unsigned int adc_min[8]={0xfff, 0xfff, 0xfff, 0xfff, 0xfff, 0xfff, 0xff
 volatile unsigned int  adc_max[8]={0,0,0,0,0,0,0,0 };
 volatile unsigned int  adc_count[8]={0,0,0,0,0,0,0,0 };
 
-
+volatile unsigned int isrtemp0=0;
+volatile unsigned int isrtemp1=0;
+volatile unsigned int samplecounter=0;
 volatile unsigned int pps_trigger=0;
 
 /* My clock setup structure */
@@ -220,8 +236,6 @@ void read_temp(void)
 /* Every .1mS */
 void tim2_isr(void)
 {
-    volatile unsigned int tempadc=0;
-
     /* Read bits from port B */
     /* Step 1 Output */
     whiteport=gpio_port_read(GPIOB);
@@ -246,6 +260,9 @@ void tim2_isr(void)
     /* Start Next Conversion */
     //if(templimit++<100000)
     {
+        if(adc_buffer_ptr>=200)
+            adc_buffer_ptr=0;
+
         for(int b=0;b<8;b++)
         {
             if(adc_values[b]>adc_max[b])   
@@ -256,9 +273,42 @@ void tim2_isr(void)
 
         }
         adc_index=0;
+        isrtemp0=adc_values[0] & 0xfff;
+        isrtemp1=adc_values[1] & 0xfff;
+
         adc_start_conversion_regular(ADC1);
+
+        /* Save a running circular buffer of the last 200 samples */
+        adc_buffer0[adc_buffer_ptr]=isrtemp0;
+        adc_buffer1[adc_buffer_ptr++]=isrtemp1;
+
+        /* If the value is outside of the window */
+        if(isrtemp0>MEDIAN_MAX)
+            isrtemp0=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp0<MEDIAN_MIN)
+                isrtemp0=0;
+            else
+                isrtemp0-=MEDIAN_MIN;
+        }
+
+        /* If the value is outside of the window */
+        if(isrtemp1>MEDIAN_MAX)
+            isrtemp1=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp1<MEDIAN_MIN)
+                isrtemp1=0;
+            else
+                isrtemp1-=MEDIAN_MIN;
+        }
+
+        stream0_freq[isrtemp0]++;
+        stream1_freq[isrtemp1]++;
+
     }
- 
+    samplecounter++;
     /* Clear Timer 2 Interrupt Flag */
     TIM_SR(TIM2) &= ~TIM_SR_UIF;
 }
@@ -295,7 +345,6 @@ static void clock_gpio_setup(void)
 
 static void adc_setup(void)
 {
-    unsigned int temp=0;
     nvic_enable_irq(NVIC_ADC_COMP_IRQ);
     nvic_set_priority(NVIC_ADC_COMP_IRQ, 2);  
     
@@ -303,8 +352,6 @@ static void adc_setup(void)
     rcc_periph_reset_pulse(RST_ADC);
     adc_enable_eoc_interrupt(ADC1);
     adc_set_clk_source(ADC1, ADC_CFGR2_CKMODE_PCLK_DIV2);
-    //adc_set_clk_prescale(ADC1, ADC_CCR_PRESC_DIV2);
-    
     adc_set_resolution(ADC1, ADC_CFGR1_RES_12_BIT);
     adc_set_single_conversion_mode(ADC1);
     ADC_CFGR2(ADC1) = (ADC_CFGR2(ADC1) & ~0x3FB) | 0x021;
@@ -313,7 +360,7 @@ static void adc_setup(void)
     adc_power_on(ADC1);
 
     adc_calibrate_async(ADC1);
-    delay_ms(10);
+    delay_ms(100);
 
     adc_start_conversion_regular(ADC1);
 }
@@ -417,11 +464,16 @@ int main(void)
     int signed_temp=0;
     unsigned int bcdtemp=0;
     unsigned int fractemp=0;
-    adc_buffer0[203]=6;
-    adc_buffer1[203]=6;
     unsigned int tempval[8];
 
-unsigned int minimum=0xffff, maximum=0;
+    unsigned int minimum=0xffff, maximum=0;
+
+    /* Reset Median Frequency Arrays */
+    for(int k=0;k<(MEDIAN_MAX-MEDIAN_MIN);k++)
+    {
+        stream0_freq[k]=0;
+        stream1_freq[k]=0;
+    }
 
     /* Wait for power to settle down */
     delay_ms(50);
@@ -546,19 +598,26 @@ unsigned int minimum=0xffff, maximum=0;
                 }
             }
 
-                usart_send_blocking(USART1,'H'); 
-                usart_send_blocking(USART1,nibble_to_hex[(maximum>>12)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(maximum>>8)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(maximum>>4)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(maximum)&0xf]);
-                usart_send_blocking(USART1,' '); 
-                
-                usart_send_blocking(USART1,'L'); 
-                usart_send_blocking(USART1,nibble_to_hex[(minimum>>12)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(minimum>>8)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(minimum>>4)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(minimum)&0xf]);
+            usart_send_blocking(USART1,'H'); 
+            usart_send_blocking(USART1,nibble_to_hex[(maximum>>12)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(maximum>>8)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(maximum>>4)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(maximum)&0xf]);
+            usart_send_blocking(USART1,' '); 
+            
+            usart_send_blocking(USART1,'L'); 
+            usart_send_blocking(USART1,nibble_to_hex[(minimum>>12)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(minimum>>8)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(minimum>>4)&0xf]);
+            usart_send_blocking(USART1,nibble_to_hex[(minimum)&0xf]);
             usart_send_blocking(USART1,'\n'); 
+
+            /* Reset Median Frequency Arrays */
+            for(int k=0;k<(MEDIAN_MAX-MEDIAN_MIN);k++)
+                stream0_freq[k]=stream1_freq[k]=0;
+
+            /* Reset Sample Counter */
+            samplecounter=0;
         }
  	}
 

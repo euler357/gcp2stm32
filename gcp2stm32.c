@@ -54,14 +54,28 @@
 unsigned int templimit=0;
 
 /* Median Calculation Stuff */
-#define RANGE       4096
-#define FREQ_WINDOW 1024
-#define MEDIAN_MAX (RANGE+FREQ_WINDOW)/2-1
-#define MEDIAN_MIN (RANGE/2)-(FREQ_WINDOW/2)
+#define MEDIAN_RANGE    4096
+#define FREQ_WINDOW     1024
+#define MEDIAN_MAX (MEDIAN_RANGE+FREQ_WINDOW)/2-1
+#define MEDIAN_MIN (MEDIAN_RANGE/2)-(FREQ_WINDOW/2)
+
+unsigned int medianValue0 =     2048;
+unsigned int medianValue1 =     2048;
+unsigned int previousMedian0 =  2048;
+unsigned int previousMedian1 =  2048;
 
 /* Frequency arrays for Median Calculation */
 uint16_t stream0_freq[FREQ_WINDOW];
 uint16_t stream1_freq[FREQ_WINDOW];
+unsigned int alt1_count=0;
+unsigned int alt2_count=0;
+
+unsigned int alt1_count_out=0;
+unsigned int alt2_count_out=0;
+
+/* Welford Variance Variables */
+unsigned int M[8], Mnext[8], S[8];
+unsigned int variance[8];
 
 /* ADC Stuff */
 uint8_t channel_array[8] = { 0,1,2,3,4,5,6,7 };
@@ -91,11 +105,6 @@ const unsigned int bin_to_eighths[8][3] = { \
 unsigned int current_temp=0;
 
 /* ADC Buffers */
-volatile uint16_t adc_buffer0[200];
-volatile uint16_t adc_buffer1[200];
-volatile unsigned int adc_buffer_ptr=0;
-
-
 volatile unsigned int ledcounter=0;
 volatile unsigned int whiteport=0;
 volatile unsigned int whitebyte=0;
@@ -104,12 +113,23 @@ volatile unsigned int alternate_toggle=0;
 volatile unsigned int adc_values[8]={0,0,0,0,0,0,0,0};
 
 volatile unsigned int adc_min[8]={0xfff, 0xfff, 0xfff, 0xfff, 0xfff, 0xfff, 0xfff, 0xfff };
-volatile unsigned int  adc_max[8]={0,0,0,0,0,0,0,0 };
-volatile unsigned int  adc_count[8]={0,0,0,0,0,0,0,0 };
+volatile unsigned int adc_max[8]={0,0,0,0,0,0,0,0 };
+
+volatile unsigned int adc_count[8]={0,0,0,0,0,0,0,0 };
+volatile unsigned int adc_count_samples=0;
+volatile unsigned int white_count2[8]={0,0,0,0,0,0,0,0};
+volatile unsigned int white_count3[4]={0,0,0,0};
+volatile unsigned int white_count4[4]={0,0,0,0};
+
+volatile unsigned int adc_count_out[8]={0,0,0,0,0,0,0,0 };
+volatile unsigned int adc_count_samples_out=0;
+volatile unsigned int white_count2_out[8]={0,0,0,0,0,0,0,0};
+volatile unsigned int white_count3_out[4]={0,0,0,0};
+volatile unsigned int white_count4_out[4]={0,0,0,0};
 
 volatile unsigned int isrtemp0=0;
 volatile unsigned int isrtemp1=0;
-volatile unsigned int samplecounter=0;
+volatile unsigned int sampleCounter=0;
 volatile unsigned int pps_trigger=0;
 
 /* My clock setup structure */
@@ -236,52 +256,59 @@ void read_temp(void)
 /* Every .1mS */
 void tim2_isr(void)
 {
-    /* Read bits from port B */
-    /* Step 1 Output */
-    whiteport=gpio_port_read(GPIOB);
 
-    /* XOR Bits */
-    /* Step 2 */
-    whiteport ^=(whiteport>>1);
-
-    /* Copy XOR'd bits into whitebyte in the correct order */
-    /* Low Nibble = 0bDCBA */
-    whitebyte=  ((whiteport & 0x4000) >> 12) |  /* C */
-                ((whiteport & 0x1000) >> 12) |  /* A */
-                ((whiteport & 0x0400) >> 9)  |  /* B */
-                ((whiteport & 0x0100) >> 5);    /* D */
-
-    /* Step 3 is implied since the data was read at a 10,000 sps rate */
-
-    /* Step 4 */
-    if (alternate_toggle^=1)
-        whitebyte^=0xf;
-
-    /* Start Next Conversion */
-    //if(templimit++<100000)
+    if(sampleCounter++<200)
     {
-        if(adc_buffer_ptr>=200)
-            adc_buffer_ptr=0;
+        /* Read bits from port B */
+        /* Step 1 Output */
+        whiteport=gpio_port_read(GPIOB);
 
-        for(int b=0;b<8;b++)
-        {
-            if(adc_values[b]>adc_max[b])   
-                adc_max[b]=adc_values[b];
-            if(adc_values[b]<adc_min[b])   
-                adc_min[b]=adc_values[b];
-            adc_count[b]+=adc_values[b];
+        /* Count ones */
+        /* Data Step 2 */
+        if(whiteport & 0x2000) white_count2[0]++;
+        if(whiteport & 0x1000) white_count2[1]++;
+        if(whiteport & 0x0800) white_count2[2]++;
+        if(whiteport & 0x0400) white_count2[3]++;
+        if(whiteport & 0x8000) white_count2[4]++;
+        if(whiteport & 0x4000) white_count2[5]++;
+        if(whiteport & 0x0200) white_count2[6]++;
+        if(whiteport & 0x0100) white_count2[7]++;
 
-        }
-        adc_index=0;
-        isrtemp0=adc_values[0] & 0xfff;
-        isrtemp1=adc_values[1] & 0xfff;
+        /* XOR Bits */
+        /* Step 2 */
+        whiteport ^=(whiteport>>1);
 
-        adc_start_conversion_regular(ADC1);
+        /* Step 3 is implied since the data was read at a 10,000 sps rate */
 
-        /* Save a running circular buffer of the last 200 samples */
-        adc_buffer0[adc_buffer_ptr]=isrtemp0;
-        adc_buffer1[adc_buffer_ptr++]=isrtemp1;
+        /* Count ones */
+        /* Data Step 3 */
+        if(whiteport & 0x1000) white_count3[0]++;  /* A */
+        if(whiteport & 0x0400) white_count3[1]++;  /* B */
+        if(whiteport & 0x4000) white_count3[2]++;  /* C */
+        if(whiteport & 0x0100) white_count3[3]++;  /* D */
 
+#if 0 /* No step 4 in latest spec */
+        /* Step 4 */
+        if (alternate_toggle^=1)
+            whitebyte^=0xf;
+
+        /* Count ones */
+        /* Data Step 4 */
+        if(whiteport & 0x1000) white_count4[0]++;  /* A */
+        if(whiteport & 0x0400) white_count4[1]++;  /* B */
+        if(whiteport & 0x4000) white_count4[2]++;  /* C */
+        if(whiteport & 0x0100) white_count4[3]++;  /* D */
+#endif
+
+        if(adc_values[0]>previousMedian0)
+            alt1_count++;
+        if(adc_values[1]>previousMedian1)
+            alt2_count++;
+    }
+    else /* Over 200 */
+    {
+        isrtemp0=adc_values[0];
+        isrtemp1=adc_values[1];
         /* If the value is outside of the window */
         if(isrtemp0>MEDIAN_MAX)
             isrtemp0=FREQ_WINDOW-1;
@@ -306,9 +333,73 @@ void tim2_isr(void)
 
         stream0_freq[isrtemp0]++;
         stream1_freq[isrtemp1]++;
-
     }
-    samplecounter++;
+
+    /* Mean, Min, Max */
+    for(int b=0;b<8;b++)
+    {
+        adc_count[b]+=adc_values[b];
+        adc_count_samples++;
+
+#if 1
+        if(adc_values[b]>adc_max[b])   
+            adc_max[b]=adc_values[b];
+        if(adc_values[b]<adc_min[b])   
+            adc_min[b]=adc_values[b];
+#endif
+    }
+
+
+   /* Start Next Conversion */
+    //if(templimit++<100000)
+    {
+        /* Zero adc index and start conversion */     
+        adc_index=0;
+        adc_start_conversion_regular(ADC1);
+    }
+#if 1
+    for(int b=0;b<8;b++)
+    {
+        if(sampleCounter == 1)
+        {
+            M[b]=adc_values[b];
+            S[b]=0;
+        }
+        else
+        {
+            Mnext[b] = M[b] + ((adc_values[b]-M[b])/sampleCounter);
+            S[b]=S[b] + ((adc_values[b]-M[b])*(adc_values[b]-Mnext[b]));
+            M[b]=Mnext[b];
+        }
+    }
+#endif
+#if 0 
+float M[8], Mnext[8], S[8];
+sampleCounter
+
+
+NEEDED FP Variables: Mnext, M, S
+NEEDED uint32 Variables: k=index x=input
+    k = 0
+
+ITERATE:
+    k += 1          # 4 ops
+    if k == 1:      # 8 ops
+        M = x       # 2 ops
+        S = 0       # 2 ops
+    else:
+        Mnext = M + (x - M) / k         # 8 + 8 + 96 ops
+        S = S + (x - M)*(x - Mnext)     # 8 + 8 + 8 + 45 ops
+        M = Mnext                       # 2 ops
+
+    return (M, S/(k-1))                     # 8 + 96 ops
+    
+    M = mean
+    S/(k-1) = Variance
+
+#endif
+
+    
     /* Clear Timer 2 Interrupt Flag */
     TIM_SR(TIM2) &= ~TIM_SR_UIF;
 }
@@ -394,7 +485,7 @@ static void timer2_setup(void)
     TIM_CR1(TIM2) |= TIM_CR1_CEN;   /* Start Timer 2 */ 
 }
 
-static void usart_print_string(char *str)
+void usart_print_string(char *str)
 {
     uint8_t c;
 
@@ -402,11 +493,52 @@ static void usart_print_string(char *str)
         usart_send_blocking(USART1, c);
 }
 
+void usart_print_hex(unsigned int inValue)
+{    
+    if(inValue&0xf000)        
+        usart_send_blocking(USART1, nibble_to_hex[(inValue>>12)&0xf]);    
+    if(inValue&0x0f00)   
+        usart_send_blocking(USART1, nibble_to_hex[(inValue>>8)&0xf]);    
+    usart_send_blocking(USART1, nibble_to_hex[(inValue>>4)&0xf]);    
+    usart_send_blocking(USART1, nibble_to_hex[inValue&0xf]);    
+    usart_send_blocking(USART1,' ');
+}
+
 /* Handle Sync Pulse */
 void exti4_15_isr(void)
 {
     exti_reset_request(EXTI11);
     pps_trigger=1;
+
+    /* Copy Stored Stuff to Temp Variables */
+    /* and clear working variables */
+    for(int n=0;n<8;n++)
+    {
+        adc_count_out[n]=adc_count[n];
+        adc_count[n]=0;
+        white_count2_out[n]=white_count2[n];
+        white_count2[n]=0;
+    }
+    for(int n=0;n<4;n++)
+    {
+        white_count3_out[n]=white_count3[n];
+        white_count3[n]=0;
+        white_count4_out[n]=white_count4[n];
+        white_count4[n]=0;
+    }
+    
+    adc_count_samples_out=adc_count_samples;
+    alt1_count_out=alt1_count;
+    alt2_count_out=alt2_count;
+    
+    adc_count_samples=0;
+    alt1_count=0;
+    alt2_count=0;
+    sampleCounter=0;
+
+    previousMedian0 = medianValue0;
+    previousMedian1 = medianValue1;
+
 }
 
 /* Set up interrupt and exti for Sync Pulse */
@@ -457,14 +589,15 @@ unsigned int binary_to_bcd(unsigned int inbinary)
 }
 
 
-
 int main(void)
 {
-    int m=0,k=0;
+    unsigned int m=0,k=0,temp=0;
     int signed_temp=0;
     unsigned int bcdtemp=0;
     unsigned int fractemp=0;
     unsigned int tempval[8];
+
+    unsigned int rawmean[8];
 
     unsigned int minimum=0xffff, maximum=0;
 
@@ -492,18 +625,18 @@ int main(void)
         
             pps_trigger=0;
 
-    	    gpio_toggle(LED_PORT,LED_PIN);
+    	    gpio_clear(LED_PORT,LED_PIN);
+
+            /* 8 Mean Values over a second */
+            /* 12-bit value per channel */
+            for(int n;n<8;n++)
+                rawmean[n]=adc_count_out[n]/sampleCounter;
 
             /* Read Temperature */
             read_temp();
 
-            /* Send counting pattern */
-            if(m>=10)
-                m=0;
+            usart_print_string("=================\n Temp   ");     
             signed_temp=current_temp;
-            usart_send_blocking(USART1, m++ + 0x30); /* USART1: Send byte. */
-            usart_send_blocking(USART1,':');
-
 
             /* Check sign and do twos compliment if needed */
             if(signed_temp & 0x800)
@@ -515,7 +648,6 @@ int main(void)
             bcdtemp=binary_to_bcd(signed_temp >>2);
             fractemp=signed_temp & 0x7;
 
-            //adc_int_counter=adc_values[k++];
             k&=7;
             usart_send_blocking(USART1,((bcdtemp>>8)&0xf) + 0x30);
             usart_send_blocking(USART1,((bcdtemp>>4)&0xf) + 0x30);
@@ -524,9 +656,8 @@ int main(void)
             usart_send_blocking(USART1,bin_to_eighths[fractemp][0]);
             usart_send_blocking(USART1,bin_to_eighths[fractemp][1]);
             usart_send_blocking(USART1,bin_to_eighths[fractemp][2]);
-            usart_send_blocking(USART1,'C');
-
-            usart_send_blocking(USART1,' ');            
+            usart_print_string("C ");    
+#if 0 /* Print occasional values*/       
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>28)&0xf]);
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>24)&0xf]);
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>20)&0xf]);
@@ -535,60 +666,20 @@ int main(void)
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>8)&0xf]);
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>4)&0xf]);
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter)&0xf]);
+            usart_print_string(" : ");  
+            for(int n=0;n<8;n++)
+                usart_print_hex(adc_values[n]);
 
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[0]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[0]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[0]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[1]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[1]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[1]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[2]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[2]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[2]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[3]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[3]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[3]&0xf]);
-
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[4]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[4]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[4]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[5]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[5]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[5]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[6]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[6]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[6]&0xf]);
-            usart_send_blocking(USART1,' ');            
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[7]>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_values[7]>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[adc_values[7]&0xf]);
-
-            usart_send_blocking(USART1,':');    
-            usart_send_blocking(USART1,':');    
-
-
-            for(int j = 0 ;j<8;j++)
-            {
-                tempval[j]=adc_count[j];
-                adc_count[j]=0;
-            }
-
+#endif
+            
+            usart_print_string("\n Means  ");     
             for(int j = 0 ;j<8;j++)
             {
 
-                tempval[j]=tempval[j] / 10000;
-                usart_send_blocking(USART1,nibble_to_hex[(tempval[j]>>12)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(tempval[j]>>8)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(tempval[j]>>4)&0xf]);
-                usart_send_blocking(USART1,nibble_to_hex[(tempval[j])&0xf]);
-                usart_send_blocking(USART1,' ');       
+                tempval[j]=adc_count_out[j] / 10000;
+
+                usart_print_hex(tempval[j]);
+
                 if(adc_int_counter>0x20000)
                 {
                     if(tempval[j]>maximum)
@@ -597,28 +688,73 @@ int main(void)
                         minimum=tempval[j];
                 }
             }
+            usart_print_string("\n Max    ");     
+            usart_print_hex(maximum);
+            usart_print_string("\n Min    ");     
+            usart_print_hex(minimum);
 
-            usart_send_blocking(USART1,'H'); 
-            usart_send_blocking(USART1,nibble_to_hex[(maximum>>12)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(maximum>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(maximum>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(maximum)&0xf]);
-            usart_send_blocking(USART1,' '); 
+#if 1 
+
+            usart_print_string("\n Median ");  
+            temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream0_freq[k];
+                if(temp>5000)
+                {
+                    medianValue0=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+            temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream1_freq[k];
+                if(temp>5000)
+                {
+                    medianValue1=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+      #endif      
             
-            usart_send_blocking(USART1,'L'); 
-            usart_send_blocking(USART1,nibble_to_hex[(minimum>>12)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(minimum>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(minimum>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(minimum)&0xf]);
-            usart_send_blocking(USART1,'\n'); 
-
             /* Reset Median Frequency Arrays */
-            for(int k=0;k<(MEDIAN_MAX-MEDIAN_MIN);k++)
+            for(int k=0;k<(FREQ_WINDOW);k++)
                 stream0_freq[k]=stream1_freq[k]=0;
 
-            /* Reset Sample Counter */
-            samplecounter=0;
+
+            usart_print_hex(medianValue0);
+            usart_print_hex(medianValue1);
+
+
+            usart_print_string("\n w2     ");    
+            for(int j = 0 ;j<8;j++)
+            {
+                usart_print_hex(white_count2_out[j]);
+            }
+            
+            usart_print_string("\n w3     ");    
+            for(int j = 0 ;j<4;j++)
+            {
+                usart_print_hex(white_count3_out[j]);
+            }
+
+#if 0 /* not in current spec */
+            usart_print_string("\n w4     ");    
+            for(int j = 0 ;j<4;j++)
+            {
+                usart_print_hex(white_count4_out[j]);
+            }
+#endif
+            usart_print_string("\n Alt    ");    
+            usart_print_hex(alt1_count_out);
+            usart_print_hex(alt2_count_out);
+            usart_print_hex(alt1_count_out ^ alt2_count_out);
+            usart_send_blocking(USART1,'\n'); 
+
+            gpio_set(LED_PORT,LED_PIN);
         }
+
  	}
 
 	return 0;

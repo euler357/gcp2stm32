@@ -18,7 +18,7 @@
 #include <libopencm3/cm3/assert.h>
 #include <libopencm3/stm32/common/adc_common_v2.h>
 
-#define delay(cycles)       		for (int i = 0; i < cycles; i++) __asm__("nop")
+#define delay(cycles)               for (int i = 0; i < cycles; i++) __asm__("nop")
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
 /* USART TX on PA9, USART RX on PA10 */
@@ -75,7 +75,8 @@ unsigned int alt2_count_out=0;
 
 /* Welford Variance Variables */
 float tempfloat ,Svar[8];
-unsigned int variance,meanval,M[8], Mnext[8];
+float meanval,M[8], Mnext[8];
+unsigned int k[8], variance[8];
 
 /* ADC Stuff */
 uint8_t channel_array[8] = { 0,1,2,3,4,5,6,7 };
@@ -300,7 +301,8 @@ void tim2_isr(void)
 
 static void process_samples(void)
 {
-    unsigned int b;
+
+    //gpio_clear(LED_PORT,LED_PIN);
 
     /* If the pointers are not equal */
     while(sampleBufferInPtr != sampleBufferOutPtr)
@@ -384,7 +386,7 @@ static void process_samples(void)
                 adc_count[b]+=adc_values[b];
                 adc_count_samples++;
 
-        #if 1
+        #if 0
                 if(adc_values[b]>adc_max[b])   
                     adc_max[b]=adc_values[b];
                 if(adc_values[b]<adc_min[b])   
@@ -392,22 +394,89 @@ static void process_samples(void)
         #endif
             }
 #endif
-    gpio_clear(LED_PORT,LED_PIN);
-        b=processedSampleCount&0x7;//for(int b=0;b<8;b++)
+        /* First Sample of Second */
+        if(processedSampleCount <= 1)
         {
-            tempfloat=adc_values[b];
-            if(processedSampleCount == 1)
-            {
-                M[b]=tempfloat;
-            }
-            else
-            {
-                Mnext[b]= M[b] + ( (tempfloat-M[b]) / processedSampleCount );
-                Svar[b] =    Svar[b] + ( (tempfloat-M[b]) * (tempfloat- Mnext[b]) );
-                M[b]=Mnext[b];
-            }
+            M[0]=(float)adc_values[0];
+            M[1]=(float)adc_values[1];
+            M[2]=(float)adc_values[2];
+            M[3]=(float)adc_values[3];
+            M[4]=(float)adc_values[4];
+            M[5]=(float)adc_values[5];
+            M[5]=(float)adc_values[6];
+            M[7]=(float)adc_values[7];
+            k[0]=k[1]=k[2]=k[3]=k[4]=k[5]=k[6]=k[7]=1;
         }
-    gpio_set(LED_PORT,LED_PIN);
+        else
+        {
+            switch(processedSampleCount&0x3)
+            {
+                case 0:
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 0
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 1
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+                    break;
+
+                case 1:
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 2
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 3
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+                    break;
+
+                case 2:
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 4
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 5
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+                    break;
+
+                case 3:
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 6
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+
+                #undef LOCAL_INDEX
+                #define LOCAL_INDEX 7
+                    tempfloat=adc_values[LOCAL_INDEX];
+                    Mnext[LOCAL_INDEX]= M[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) / (k[LOCAL_INDEX]++) );
+                    Svar[LOCAL_INDEX] = Svar[LOCAL_INDEX] + ( (tempfloat-M[LOCAL_INDEX]) * (tempfloat- Mnext[LOCAL_INDEX]) );
+                    M[LOCAL_INDEX]=Mnext[LOCAL_INDEX];
+                    break;
+           }
+        }
+
     }
 
 
@@ -440,13 +509,20 @@ static void process_samples(void)
         adc_count_samples=0;
         alt1_count=0;
         alt2_count=0;
-        variance=((unsigned int)Svar[0])/1249;;
-        meanval=(unsigned int)M[0];
+        variance[0]=((unsigned int)Svar[0])/2499;
+        variance[1]=((unsigned int)Svar[1])/2499;
+        variance[2]=((unsigned int)Svar[2])/2499;
+        variance[3]=((unsigned int)Svar[3])/2499;
+        variance[4]=((unsigned int)Svar[4])/2499;
+        variance[5]=((unsigned int)Svar[5])/2499;
+        variance[6]=((unsigned int)Svar[6])/2499;
+        variance[7]=((unsigned int)Svar[7])/2499;
         
-        M[0]=0;Svar[0]=0;
+        Svar[0]=Svar[1]=Svar[2]=Svar[3]=Svar[4]=Svar[5]=Svar[6]=Svar[7]=0;
         previousMedian0 = medianValue0;
         previousMedian1 = medianValue1;
     }
+    //gpio_set(LED_PORT,LED_PIN);
 }
 
 
@@ -648,14 +724,11 @@ unsigned int binary_to_bcd(unsigned int inbinary)
 
 int main(void)
 {
-    unsigned int m=0,k=0,temp=0;
+    unsigned int k=0,temp=0;
     int signed_temp=0;
     unsigned int bcdtemp=0;
     unsigned int fractemp=0;
     unsigned int tempval[8];
-
-    unsigned int rawmean[8];
-
     unsigned int minimum=0xffff, maximum=0;
 
     /* Reset Median Frequency Arrays */
@@ -675,20 +748,16 @@ int main(void)
     sync_setup();
 
     while(1)
-	{  
+    {  
         process_samples();
         /* If we got the 1pps trigger */
         if(processingDone)
         {
+            gpio_clear(LED_PORT,LED_PIN);
+
             processingDone=0;
 
-    	    //gpio_clear(LED_PORT,LED_PIN);
-
-            /* 8 Mean Values over a second */
-            /* 12-bit value per channel */
-            for(int n;n<8;n++)
-                rawmean[n]=adc_count_out[n]/sampleCounter;
-
+            
             /* Read Temperature */
             read_temp();
 
@@ -702,7 +771,7 @@ int main(void)
                 signed_temp=(signed_temp ^ 0xFFF)+1;            
             }
 
-            bcdtemp=binary_to_bcd(signed_temp >>2);
+            bcdtemp=binary_to_bcd(signed_temp>>2);
             fractemp=signed_temp & 0x7;
 
             k&=7;
@@ -728,21 +797,23 @@ int main(void)
             usart_print_string("\n Samp   "); 
             usart_print_hex(endSampleNumberPrev);
 
+
 #if 0 /* Print occasional values*/       
             usart_print_string("\n Values "); 
             for(int n=0;n<8;n++)
-                usart_print_hex(adc_values[n]);
+                usart_print_2bytes(adc_values[n]);
          
-            
+#endif            
+#if 1
             usart_print_string("\n Means  ");     
             for(int j = 0 ;j<8;j++)
             {
 
                 tempval[j]=adc_count_out[j] / 10000;
 
-                usart_print_hex(tempval[j]);
+                usart_print_2bytes(tempval[j]);
 
-                if(adc_int_counter>0x20000)
+                if(adc_int_counter>0x30000)
                 {
                     if(tempval[j]>maximum)
                         maximum=tempval[j];
@@ -751,11 +822,15 @@ int main(void)
                 }
             }
 
-#endif
-            usart_print_string("\n Max    ");     
+            usart_print_string("\n Vari   ");    
+            for(int j=0;j<8;j++)
+                usart_print_hex(variance[j]);
+
+            usart_print_string("\n MeanMx ");     
             usart_print_hex(maximum);
-            usart_print_string("\n Min    ");     
+            usart_print_string("\n MeanMn ");     
             usart_print_hex(minimum);
+#endif
 
 #if 1 
 
@@ -803,11 +878,7 @@ int main(void)
             {
                 usart_print_byte(white_count3_out[j]);
             }
-            
-            usart_print_string("\n Mean   ");    
-            usart_print_hex(meanval);
-            usart_print_string("\n Vari   ");    
-            usart_print_hex(variance);
+
 #if 0 /* not in current spec */
             usart_print_string("\n w4     ");    
             for(int j = 0 ;j<4;j++)
@@ -821,10 +892,8 @@ int main(void)
             usart_print_byte(alt1_count_out ^ alt2_count_out);
             usart_send_blocking(USART1,'\n'); 
 
-            //gpio_set(LED_PORT,LED_PIN);
+            gpio_set(LED_PORT,LED_PIN);
         }
-
- 	}
-
-	return 0;
+    }
+    return 0;
 }

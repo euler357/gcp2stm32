@@ -55,7 +55,7 @@ unsigned int templimit=0;
 
 /* Median Calculation Stuff */
 #define MEDIAN_RANGE    4096
-#define FREQ_WINDOW     512
+#define FREQ_WINDOW     1024
 #define MEDIAN_MAX (MEDIAN_RANGE+FREQ_WINDOW)/2-1
 #define MEDIAN_MIN (MEDIAN_RANGE/2)-(FREQ_WINDOW/2)
 
@@ -133,7 +133,8 @@ volatile unsigned int isrtemp0=0;
 volatile unsigned int isrtemp1=0;
 volatile unsigned int sampleCounter=0;
 
-#define SAMPLE_BUFFER_SIZE      256
+#define SAMPLE_BUFFER_SIZE      128
+#define SAMPLE_BUFFER_MASK      0x7f
 volatile unsigned int sampleBufferInPtr=0;
 volatile unsigned int sampleBufferOutPtr=0;
 volatile uint16_t samplebuffer0[SAMPLE_BUFFER_SIZE];
@@ -285,7 +286,7 @@ void tim2_isr(void)
     sampleCounter++;
  
     /* Increment input pointer and save to circular buffer */
-    sampleBufferInPtr=(sampleBufferInPtr+1)&0xff;
+    sampleBufferInPtr=(sampleBufferInPtr+1)&SAMPLE_BUFFER_MASK;
     whitebuffer[sampleBufferInPtr]=(gpio_port_read(GPIOB) >> 8);
 
     samplebuffer0[sampleBufferInPtr]=adc_tempval[0];
@@ -317,7 +318,7 @@ static void process_samples(void)
         adc_values[6]=samplebuffer6[sampleBufferOutPtr];
         adc_values[7]=samplebuffer7[sampleBufferOutPtr];
 
-        sampleBufferOutPtr=(sampleBufferOutPtr+1)&0xff;
+        sampleBufferOutPtr=(sampleBufferOutPtr+1)&SAMPLE_BUFFER_MASK;
 
         if(processedSampleCount++<200)
             {

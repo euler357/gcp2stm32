@@ -37,8 +37,8 @@
 
 /* I2C LM75A */
 #define TEMP_PORT   GPIOB
-#define TEMP_SDA    GPIO0
-#define TEMP_SCL    GPIO1
+#define TEMP_SDA    GPIO3
+#define TEMP_SCL    GPIO4
 
 /* I2C Stuff */
 #define SCL0    gpio_clear(TEMP_PORT,TEMP_SCL)
@@ -79,7 +79,7 @@ float meanval,M[8], Mnext[8];
 unsigned int k[8], variance[8];
 
 /* ADC Stuff */
-uint8_t channel_array[8] = { 0,1,2,3,4,5,6,7 };
+uint8_t channel_array[8] = { 0,1,2,4,5,6,7,8 };
 
 unsigned int adc_index=0;
 unsigned int adc_int_counter=0;
@@ -292,11 +292,11 @@ void tim2_isr(void)
     samplebuffer0[sampleBufferInPtr]=adc_tempval[0];
     samplebuffer1[sampleBufferInPtr]=adc_tempval[1];
     samplebuffer2[sampleBufferInPtr]=adc_tempval[2];
-    samplebuffer3[sampleBufferInPtr]=adc_tempval[3];
-    samplebuffer4[sampleBufferInPtr]=adc_tempval[4];
-    samplebuffer5[sampleBufferInPtr]=adc_tempval[5];
-    samplebuffer6[sampleBufferInPtr]=adc_tempval[6];
-    samplebuffer7[sampleBufferInPtr]=adc_tempval[7];
+    samplebuffer3[sampleBufferInPtr]=adc_tempval[7];
+    samplebuffer4[sampleBufferInPtr]=adc_tempval[3];
+    samplebuffer5[sampleBufferInPtr]=adc_tempval[4];
+    samplebuffer6[sampleBufferInPtr]=adc_tempval[5];
+    samplebuffer7[sampleBufferInPtr]=adc_tempval[6];
 
 }
 
@@ -544,6 +544,8 @@ static void clock_gpio_setup(void)
     gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, \
         GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 |  GPIO7 );
+    gpio_mode_setup(GPIOB, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 );
+
     gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8 | GPIO9 | \
                      GPIO10 | GPIO11 | GPIO12 | GPIO13 | GPIO14 | GPIO15);
     gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_PIN);
@@ -828,9 +830,9 @@ int main(void)
                 usart_print_hex(variance[j]);
 
             usart_print_string("\n MeanMx ");     
-            usart_print_hex(maximum);
+            usart_print_2bytes(maximum);
             usart_print_string("\n MeanMn ");     
-            usart_print_hex(minimum);
+            usart_print_2bytes(minimum);
 #endif
 
 #if 1 

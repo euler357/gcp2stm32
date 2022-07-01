@@ -22,7 +22,7 @@
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
 #define PACKED_OUTPUT   1
-#define TESTING_ONLY    1
+#define ORIGINAL_HW     0
 
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
@@ -38,10 +38,22 @@
 #define SYNC_PORT   GPIOA
 #define SYNC_PIN    GPIO11
 
+
+#if ORIGINAL_HW
+
+/* I2C LM75A */
+#define TEMP_PORT   GPIOB
+#define TEMP_SDA    GPIO0
+#define TEMP_SCL    GPIO1
+
+#else
+
 /* I2C LM75A */
 #define TEMP_PORT   GPIOB
 #define TEMP_SDA    GPIO3
 #define TEMP_SCL    GPIO4
+
+#endif
 
 /* I2C Stuff */
 #define SCL0    gpio_clear(TEMP_PORT,TEMP_SCL)
@@ -81,8 +93,17 @@ float tempfloat ,Svar[8];
 float meanval,M[8], Mnext[8];
 unsigned int k[8], variance[8];
 
+#if ORIGINAL_HW
+
+/* ADC Stuff */
+uint8_t channel_array[8] = { 0,1,2,3,4,5,6,7 };
+
+#else
+
 /* ADC Stuff */
 uint8_t channel_array[8] = { 0,1,2,4,5,6,7,8 };
+
+#endif
 
 unsigned int adc_index=0;
 unsigned int adc_int_counter=0;
@@ -229,10 +250,19 @@ unsigned int i2c_receive_byte(void)
         tempbyte<<=1;
         delay(CLK_DELAY);
         SCL1;delay(CLK_DELAY);
-        if((gpio_port_read(TEMP_PORT) & 0x1)==0x1)
-            tempbyte|=1;
-        else
-            tempbyte|=0;
+
+        #if ORIGINAL_HW
+            if((gpio_port_read(TEMP_PORT) & 0x1)==0x1)
+                tempbyte|=1;
+            else
+                tempbyte|=0;
+        #else
+            if((gpio_port_read(TEMP_PORT) & 0x8)==0x8)
+                tempbyte|=1;
+            else
+                tempbyte|=0;        
+        #endif
+
         SCL0;
 
         delay(CLK_DELAY);
@@ -272,7 +302,8 @@ void read_temp(void)
     gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SCL | TEMP_SDA);
 
     /* Write read temperature to global variable */
-    current_temp=tempvar >> 6;
+    //current_temp=tempvar >> 6;
+    current_temp=tempvar;
 }
 
 /* Timer 2 ISR */
@@ -543,12 +574,13 @@ static void clock_gpio_setup(void)
     rcc_periph_clock_enable(RCC_SYSCFG);
     rcc_periph_clock_enable(RCC_DMA1);
 
+
+#if ORIGINAL_HW
+
     /* Set up Pin Modes */
     gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, \
-        GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 );
-
-    gpio_mode_setup(GPIOB, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 );
+        GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 | GPIO7 );
 
     gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8 | GPIO9 | \
                      GPIO10 | GPIO11 | GPIO12 | GPIO13 | GPIO14 | GPIO15);
@@ -560,6 +592,31 @@ static void clock_gpio_setup(void)
     gpio_set_af(USART_PORT, GPIO_AF1, USART_TXPIN);
 
     gpio_mode_setup(SYNC_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
+
+#else
+
+
+    /* Set up Pin Modes */
+    gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
+    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, \
+        GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 );
+
+    gpio_mode_setup(GPIOB, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 );
+
+    gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8 | GPIO9 | \
+                     GPIO10 | GPIO11 | GPIO12 | GPIO13 | GPIO14 | GPIO15);
+    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_PIN);
+    gpio_mode_setup(USART_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, USART_TXPIN);
+
+    gpio_mode_setup(TEMP_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, TEMP_SCL | TEMP_SDA);
+
+    /* Setup USART TX pin as alternate function. */
+    gpio_set_af(USART_PORT, GPIO_AF1, USART_TXPIN);
+
+    gpio_mode_setup(SYNC_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
+
+#endif
+
 }
 
 static void adc_setup(void)
@@ -779,7 +836,7 @@ int main(void)
             /* MEAN_RAW_1-MEAN_RAW_4 */
             for(int j=0;j<4;j++) /* 14 */
             {
-                tempword=adc_count_out[j] * 64 / 25; /* count * 256 / 200 */
+                tempword=adc_count_out[j] * 32 / 25; /* count * 256 / 200 */
                 usart_send_blocking(USART1,tempword & 0xff);        
                 usart_send_blocking(USART1,(tempword>>8) & 0xff);        
                 usart_send_blocking(USART1,(tempword>>16) & 0xff);       
@@ -788,7 +845,7 @@ int main(void)
             /* MEAN_RAW_1-MEAN_RAW_8 */
             for(int j=4;j<8;j++) /* 26 */
             {
-                tempword=(adc_count_out[j] * 16) / 625; /* count * 256 / 1000 */
+                tempword=(adc_count_out[j] * 16) / 625; /* count * 256 / 10000 */
                 usart_send_blocking(USART1,tempword & 0xff);        
                 usart_send_blocking(USART1,(tempword>>8) & 0xff);        
                 usart_send_blocking(USART1,(tempword>>16) & 0xff);       

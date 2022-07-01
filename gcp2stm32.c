@@ -21,6 +21,9 @@
 #define delay(cycles)               for (int i = 0; i < cycles; i++) __asm__("nop")
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
+#define PACKED_OUTPUT   1
+#define TESTING_ONLY    1
+
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
 #define USART_TXPIN GPIO9
@@ -322,6 +325,13 @@ static void process_samples(void)
 
         if(processedSampleCount++<200)
             {
+                /* Mean, Min, Max */
+                for(int b=0;b<8;b++)
+                {
+                    adc_count[b]+=adc_values[b];
+                    adc_count_samples++;
+                }
+
                 /* Count ones */
                 /* Data Step 2 */
                 if(whiteport & 0x20) white_count2[0]++;
@@ -353,6 +363,13 @@ static void process_samples(void)
             }
             else /* Over 200 */
             {
+                /* Mean, Min, Max */
+                for(int b=4;b<8;b++)
+                {
+                    adc_count[b]+=adc_values[b];
+                    adc_count_samples++;
+                }
+
                 isrtemp0=adc_values[0];
                 isrtemp1=adc_values[1];
                 /* If the value is outside of the window */
@@ -380,21 +397,7 @@ static void process_samples(void)
                 stream0_freq[isrtemp0]++;
                 stream1_freq[isrtemp1]++;
             }
-#if 1
-            /* Mean, Min, Max */
-            for(int b=0;b<8;b++)
-            {
-                adc_count[b]+=adc_values[b];
-                adc_count_samples++;
 
-        #if 0
-                if(adc_values[b]>adc_max[b])   
-                    adc_max[b]=adc_values[b];
-                if(adc_values[b]<adc_min[b])   
-                    adc_min[b]=adc_values[b];
-        #endif
-            }
-#endif
         /* First Sample of Second */
         if(processedSampleCount <= 1)
         {
@@ -543,7 +546,8 @@ static void clock_gpio_setup(void)
     /* Set up Pin Modes */
     gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, SYNC_PIN);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, \
-        GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 |  GPIO7 );
+        GPIO0 | GPIO1 | GPIO2 | GPIO3 | GPIO4 |  GPIO5 |  GPIO6 );
+
     gpio_mode_setup(GPIOB, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 );
 
     gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8 | GPIO9 | \
@@ -733,6 +737,7 @@ int main(void)
     unsigned int fractemp=0;
     unsigned int tempval[8];
     unsigned int minimum=0xffff, maximum=0;
+    unsigned int tempword=0;
 
     /* Reset Median Frequency Arrays */
     for(int k=0;k<(MEDIAN_MAX-MEDIAN_MIN);k++)
@@ -742,7 +747,7 @@ int main(void)
     }
 
     /* Wait for power to settle down */
-    delay_ms(50);
+    delay_ms(100);
 
     clock_gpio_setup();
     adc_setup();
@@ -760,11 +765,47 @@ int main(void)
 
             processingDone=0;
 
-            
             /* Read Temperature */
             read_temp();
 
+            //current_temp=0xEFBE;
+
+#if PACKED_OUTPUT   
+
+            /* TEMP1 */
+            usart_send_blocking(USART1,(current_temp & 0xff));        /* 01 */
+            usart_send_blocking(USART1,((current_temp>>8) & 0xff));   /* 02 */
+
+            /* MEAN_RAW_1-MEAN_RAW_4 */
+            for(int j=0;j<4;j++) /* 14 */
+            {
+                tempword=adc_count_out[j] * 64 / 25; /* count * 256 / 200 */
+                usart_send_blocking(USART1,tempword & 0xff);        
+                usart_send_blocking(USART1,(tempword>>8) & 0xff);        
+                usart_send_blocking(USART1,(tempword>>16) & 0xff);       
+            }
+
+            /* MEAN_RAW_1-MEAN_RAW_8 */
+            for(int j=4;j<8;j++) /* 26 */
+            {
+                tempword=(adc_count_out[j] * 16) / 625; /* count * 256 / 1000 */
+                usart_send_blocking(USART1,tempword & 0xff);        
+                usart_send_blocking(USART1,(tempword>>8) & 0xff);        
+                usart_send_blocking(USART1,(tempword>>16) & 0xff);       
+            }
+
+            /* Send chars to pad to 328 so the ESP32 will work */
+            /* ESP32 is counting bytes between pulses */
+            for(int tempcount=0;tempcount<(81-26);tempcount++)
+                usart_send_blocking(USART1,tempcount & 0xff);
+            
+            /* Delay so we can see the LED flash */
+            delay_ms(10);
+
+#else
+
             usart_print_string("=================\n Temp   ");     
+
             signed_temp=current_temp;
 
             /* Check sign and do twos compliment if needed */
@@ -786,6 +827,7 @@ int main(void)
             usart_send_blocking(USART1,bin_to_eighths[fractemp][1]);
             usart_send_blocking(USART1,bin_to_eighths[fractemp][2]);
             usart_print_string("C ");    
+
             usart_print_string("\n Count  "); 
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>28)&0xf]);
             usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>24)&0xf]);
@@ -800,14 +842,6 @@ int main(void)
             usart_print_string("\n Samp   "); 
             usart_print_hex(endSampleNumberPrev);
 
-
-#if 0 /* Print occasional values*/       
-            usart_print_string("\n Values "); 
-            for(int n=0;n<8;n++)
-                usart_print_2bytes(adc_values[n]);
-         
-#endif            
-#if 1
             usart_print_string("\n Means  ");     
             for(int j = 0 ;j<8;j++)
             {
@@ -833,9 +867,6 @@ int main(void)
             usart_print_2bytes(maximum);
             usart_print_string("\n MeanMn ");     
             usart_print_2bytes(minimum);
-#endif
-
-#if 1 
 
             usart_print_string("\n Median ");  
             temp=0;
@@ -859,8 +890,6 @@ int main(void)
                 }
             }
 
-      #endif      
-            
             /* Reset Median Frequency Arrays */
             for(int k=0;k<(FREQ_WINDOW);k++)
                 stream0_freq[k]=stream1_freq[k]=0;
@@ -882,18 +911,12 @@ int main(void)
                 usart_print_byte(white_count3_out[j]);
             }
 
-#if 0 /* not in current spec */
-            usart_print_string("\n w4     ");    
-            for(int j = 0 ;j<4;j++)
-            {
-                usart_print_hex(white_count4_out[j]);
-            }
-#endif
             usart_print_string("\n Alt    ");    
             usart_print_byte(alt1_count_out);
             usart_print_byte(alt2_count_out);
             usart_print_byte(alt1_count_out ^ alt2_count_out);
             usart_send_blocking(USART1,'\n'); 
+#endif
 
             gpio_set(LED_PORT,LED_PIN);
         }

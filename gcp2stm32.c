@@ -22,7 +22,7 @@
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
 #define PACKED_OUTPUT   1
-#define ORIGINAL_HW     0
+#define ORIGINAL_HW     1
 
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
@@ -70,18 +70,25 @@ unsigned int templimit=0;
 
 /* Median Calculation Stuff */
 #define MEDIAN_RANGE    4096
-#define FREQ_WINDOW     1024
+#define FREQ_WINDOW     512
 #define MEDIAN_MAX (MEDIAN_RANGE+FREQ_WINDOW)/2-1
 #define MEDIAN_MIN (MEDIAN_RANGE/2)-(FREQ_WINDOW/2)
 
 unsigned int medianValue0 =     2048;
 unsigned int medianValue1 =     2048;
+unsigned int medianValue2 =     2048;
+unsigned int medianValue3 =     2048;
 unsigned int previousMedian0 =  2048;
 unsigned int previousMedian1 =  2048;
+unsigned int previousMedian2 =  2048;
+unsigned int previousMedian3 =  2048;
 
 /* Frequency arrays for Median Calculation */
 uint16_t stream0_freq[FREQ_WINDOW];
 uint16_t stream1_freq[FREQ_WINDOW];
+uint16_t stream2_freq[FREQ_WINDOW];
+uint16_t stream3_freq[FREQ_WINDOW];
+
 unsigned int alt1_count=0;
 unsigned int alt2_count=0;
 
@@ -155,6 +162,8 @@ volatile unsigned int white_count4_out[4]={0,0,0,0};
 
 volatile unsigned int isrtemp0=0;
 volatile unsigned int isrtemp1=0;
+volatile unsigned int isrtemp2=0;
+volatile unsigned int isrtemp3=0;
 volatile unsigned int sampleCounter=0;
 
 #define SAMPLE_BUFFER_SIZE      128
@@ -403,6 +412,9 @@ static void process_samples(void)
 
                 isrtemp0=adc_values[0];
                 isrtemp1=adc_values[1];
+                isrtemp2=adc_values[2];
+                isrtemp3=adc_values[3];
+
                 /* If the value is outside of the window */
                 if(isrtemp0>MEDIAN_MAX)
                     isrtemp0=FREQ_WINDOW-1;
@@ -425,8 +437,32 @@ static void process_samples(void)
                         isrtemp1-=MEDIAN_MIN;
                 }
 
+                /* If the value is outside of the window */
+                if(isrtemp2>MEDIAN_MAX)
+                    isrtemp2=FREQ_WINDOW-1;
+                else
+                {
+                    if(isrtemp2<MEDIAN_MIN)
+                        isrtemp2=0;
+                    else
+                        isrtemp2-=MEDIAN_MIN;
+                }
+
+                /* If the value is outside of the window */
+                if(isrtemp3>MEDIAN_MAX)
+                    isrtemp3=FREQ_WINDOW-1;
+                else
+                {
+                    if(isrtemp3<MEDIAN_MIN)
+                        isrtemp3=0;
+                    else
+                        isrtemp3-=MEDIAN_MIN;
+                }
+
                 stream0_freq[isrtemp0]++;
                 stream1_freq[isrtemp1]++;
+                stream2_freq[isrtemp2]++;
+                stream3_freq[isrtemp3]++;
             }
 
         /* First Sample of Second */
@@ -842,7 +878,7 @@ int main(void)
                 usart_send_blocking(USART1,(tempword>>16) & 0xff);       
             }
 
-            /* MEAN_RAW_1-MEAN_RAW_8 */
+            /* MEAN_RAW_5-MEAN_RAW_8 */
             for(int j=4;j<8;j++) /* 26 */
             {
                 tempword=(adc_count_out[j] * 16) / 625; /* count * 256 / 10000 */
@@ -851,13 +887,83 @@ int main(void)
                 usart_send_blocking(USART1,(tempword>>16) & 0xff);       
             }
 
+            /* VARIANCE_RAW1 - VARIANCE_RAW8 */
+            for(int j=0;j<8;j++) /* 50 */
+            {
+                tempword=variance[j];
+                usart_send_blocking(USART1,tempword & 0xff);        
+                usart_send_blocking(USART1,(tempword>>8) & 0xff);        
+                usart_send_blocking(USART1,(tempword>>16) & 0xff);       
+            }
+
+            /* MEDIAN_RAW1 - MEDIAN_RAW4 */ /* 58 */
+           temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream0_freq[k];
+                if(temp>5000)
+                {
+                    medianValue0=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+            temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream1_freq[k];
+                if(temp>5000)
+                {
+                    medianValue1=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+            temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream2_freq[k];
+                if(temp>5000)
+                {
+                    medianValue2=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+            temp=0;
+            for(k = 0; k < FREQ_WINDOW;k++)
+            {
+                temp+=stream3_freq[k];
+                if(temp>5000)
+                {
+                    medianValue3=k+MEDIAN_MIN;
+                    break;
+                }
+            }
+
+            /* Reset Median Frequency Arrays */
+            for(int k=0;k<(FREQ_WINDOW);k++)
+                stream0_freq[k]=stream1_freq[k]=stream2_freq[k]=stream3_freq[k]=0;
+
+            usart_send_blocking(USART1,medianValue0 & 0xff);        
+            usart_send_blocking(USART1,(medianValue0>>8) & 0xff); 
+
+            usart_send_blocking(USART1,medianValue1 & 0xff);        
+            usart_send_blocking(USART1,(medianValue1>>8) & 0xff);             
+
+            usart_send_blocking(USART1,medianValue2 & 0xff);        
+            usart_send_blocking(USART1,(medianValue2>>8) & 0xff); 
+
+            usart_send_blocking(USART1,medianValue3 & 0xff);        
+            usart_send_blocking(USART1,(medianValue3>>8) & 0xff); 
+
+            /* FIRST_RAW1 - FIRST_RAW4 */ /* 64 */
+
+            /* COUNT_FF1_200 - COUNT_FF8_200 */ /* 72 */
+
+            /* COUNT_FF1_XOR_FF2
             /* Send chars to pad to 328 so the ESP32 will work */
             /* ESP32 is counting bytes between pulses */
-            for(int tempcount=0;tempcount<(81-26);tempcount++)
+            for(int tempcount=0;tempcount<(81-58);tempcount++)
                 usart_send_blocking(USART1,tempcount & 0xff);
-            
-            /* Delay so we can see the LED flash */
-            delay_ms(10);
+        
 
 #else
 

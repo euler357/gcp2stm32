@@ -1,6 +1,6 @@
 /********************************
 * GCP 2.0 STM32G030 Firmware    *
-* April 2022                    *
+* July 2022                     *
 * Chris K Cockrum               *
 * https://accuforge.com         *
 ********************************/
@@ -150,12 +150,15 @@ volatile unsigned int adc_max[8]={0,0,0,0,0,0,0,0 };
 
 volatile unsigned int adc_count[8]={0,0,0,0,0,0,0,0 };
 volatile unsigned int adc_count_samples=0;
+
+volatile unsigned int first_raw[4]={0,0,0,0};
 volatile unsigned int white_count2[8]={0,0,0,0,0,0,0,0};
 volatile unsigned int white_count3[4]={0,0,0,0};
 volatile unsigned int white_count4[4]={0,0,0,0};
 
 volatile unsigned int adc_count_out[8]={0,0,0,0,0,0,0,0 };
 volatile unsigned int adc_count_samples_out=0;
+volatile unsigned int first_raw_out[4]={0,0,0,0};
 volatile unsigned int white_count2_out[8]={0,0,0,0,0,0,0,0};
 volatile unsigned int white_count3_out[4]={0,0,0,0};
 volatile unsigned int white_count4_out[4]={0,0,0,0};
@@ -365,6 +368,15 @@ static void process_samples(void)
 
         if(processedSampleCount++<200)
             {
+                /* If this is the first sample */
+                if(processedSampleCount==1)
+                {
+                    first_raw[0]=adc_values[0];
+                    first_raw[1]=adc_values[1];
+                    first_raw[2]=adc_values[2];
+                    first_raw[3]=adc_values[3];
+                }
+
                 /* Mean, Min, Max */
                 for(int b=0;b<8;b++)
                 {
@@ -395,6 +407,23 @@ static void process_samples(void)
                 if(whiteport & 0x04) white_count3[1]++;  /* B */
                 if(whiteport & 0x40) white_count3[2]++;  /* C */
                 if(whiteport & 0x01) white_count3[3]++;  /* D */
+
+                /* Count ones in xor alt sequence */
+                /* Data Step 4 */
+                if(processedSampleCount&1)
+                {
+                    if(!(whiteport & 0x10)) white_count4[0]++;  /* A */
+                    if(!(whiteport & 0x04)) white_count4[1]++;  /* B */
+                    if(!(whiteport & 0x40)) white_count4[2]++;  /* C */
+                    if(!(whiteport & 0x01)) white_count4[3]++;  /* D */
+                }
+                else
+                {
+                    if(whiteport & 0x10) white_count4[0]++;  /* A */
+                    if(whiteport & 0x04) white_count4[1]++;  /* B */
+                    if(whiteport & 0x40) white_count4[2]++;  /* C */
+                    if(whiteport & 0x01) white_count4[3]++;  /* D */   
+                }
 
                 if(adc_values[0]>previousMedian0)
                     alt1_count++;
@@ -564,15 +593,18 @@ static void process_samples(void)
         }
         for(int n=0;n<4;n++)
         {
+            first_raw_out[n]=first_raw[n];
+            first_raw[n]=0;
             white_count3_out[n]=white_count3[n];
             white_count3[n]=0;
             white_count4_out[n]=white_count4[n];
             white_count4[n]=0;
+
         }
         adc_count_samples_out=adc_count_samples;
         alt1_count_out=alt1_count;
         alt2_count_out=alt2_count;
-        
+     
         processingDone=1;
         endSampleNumberPrev=endSampleNumber;
         endSampleNumber=10100;
@@ -954,16 +986,43 @@ int main(void)
             usart_send_blocking(USART1,medianValue3 & 0xff);        
             usart_send_blocking(USART1,(medianValue3>>8) & 0xff); 
 
-            /* FIRST_RAW1 - FIRST_RAW4 */ /* 64 */
+            /* FIRST_RAW1 - FIRST_RAW4 */ /* 66 */
+            usart_send_blocking(USART1,first_raw_out[0] & 0xff);        
+            usart_send_blocking(USART1,(first_raw_out[0]>>8) & 0xf); 
 
-            /* COUNT_FF1_200 - COUNT_FF8_200 */ /* 72 */
+            usart_send_blocking(USART1,first_raw_out[1] & 0xff);        
+            usart_send_blocking(USART1,(first_raw_out[1]>>8) & 0xf); 
 
-            /* COUNT_FF1_XOR_FF2
-            /* Send chars to pad to 328 so the ESP32 will work */
-            /* ESP32 is counting bytes between pulses */
-            for(int tempcount=0;tempcount<(81-58);tempcount++)
-                usart_send_blocking(USART1,tempcount & 0xff);
+            usart_send_blocking(USART1,first_raw_out[2] & 0xff);        
+            usart_send_blocking(USART1,(first_raw_out[2]>>8) & 0xf); 
+
+            usart_send_blocking(USART1,first_raw_out[3] & 0xff);        
+            usart_send_blocking(USART1,(first_raw_out[3]>>8) & 0xf); 
+
+            /* COUNT_FF1_200 - COUNT_FF8_200 */ /* 74 */
+            usart_send_blocking(USART1,white_count2_out[0] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[1] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[2] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[3] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[4] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[5] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[6] & 0xff);        
+            usart_send_blocking(USART1,white_count2_out[7] & 0xff);        
+
+            /* COUNT_FF1_XOR_FF2 */ /* 78 */
+            usart_send_blocking(USART1,white_count3_out[0] & 0xff);        
+            usart_send_blocking(USART1,white_count3_out[1] & 0xff);        
+            usart_send_blocking(USART1,white_count3_out[2] & 0xff);        
+            usart_send_blocking(USART1,white_count3_out[3] & 0xff);        
+
+            /* COUNT_FF1_XOR_FF2 ALT */ /* 82 */
+            usart_send_blocking(USART1,white_count4_out[0] & 0xff);        
+            usart_send_blocking(USART1,white_count4_out[1] & 0xff);        
+            usart_send_blocking(USART1,white_count4_out[2] & 0xff);        
+            //usart_send_blocking(USART1,white_count4[3] & 0xff);        
         
+            /* XOR_GT_MEDIANS */ /* 83 */
+            //usart_send_blocking(USART1,(alt1_count_out ^ alt2_count_out) & 0xff);       
 
 #else
 

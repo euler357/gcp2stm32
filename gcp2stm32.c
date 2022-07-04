@@ -22,7 +22,7 @@
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
 #define PACKED_OUTPUT   1
-#define ORIGINAL_HW     1
+#define ORIGINAL_HW     0
 
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
@@ -367,132 +367,130 @@ static void process_samples(void)
         sampleBufferOutPtr=(sampleBufferOutPtr+1)&SAMPLE_BUFFER_MASK;
 
         if(processedSampleCount++<200)
+        {
+            /* Mean, Min, Max */
+            for(int b=0;b<4;b++)
             {
-                /* If this is the first sample */
-                if(processedSampleCount==1)
-                {
-                    first_raw[0]=adc_values[0];
-                    first_raw[1]=adc_values[1];
-                    first_raw[2]=adc_values[2];
-                    first_raw[3]=adc_values[3];
-                }
-
-                /* Mean, Min, Max */
-                for(int b=0;b<8;b++)
-                {
-                    adc_count[b]+=adc_values[b];
-                    adc_count_samples++;
-                }
-
-                /* Count ones */
-                /* Data Step 2 */
-                if(whiteport & 0x20) white_count2[0]++;
-                if(whiteport & 0x10) white_count2[1]++;
-                if(whiteport & 0x08) white_count2[2]++;
-                if(whiteport & 0x04) white_count2[3]++;
-                if(whiteport & 0x80) white_count2[4]++;
-                if(whiteport & 0x40) white_count2[5]++;
-                if(whiteport & 0x02) white_count2[6]++;
-                if(whiteport & 0x01) white_count2[7]++;
-
-                /* XOR Bits */
-                /* Step 2 */
-                whiteport ^=(whiteport>>1);
-
-                /* Step 3 is implied since the data was read at a 10,000 sps rate */
-
-                /* Count ones */
-                /* Data Step 3 */
-                if(whiteport & 0x10) white_count3[0]++;  /* A */
-                if(whiteport & 0x04) white_count3[1]++;  /* B */
-                if(whiteport & 0x40) white_count3[2]++;  /* C */
-                if(whiteport & 0x01) white_count3[3]++;  /* D */
-
-                /* Count ones in xor alt sequence */
-                /* Data Step 4 */
-                if(processedSampleCount&1)
-                {
-                    if(!(whiteport & 0x10)) white_count4[0]++;  /* A */
-                    if(!(whiteport & 0x04)) white_count4[1]++;  /* B */
-                    if(!(whiteport & 0x40)) white_count4[2]++;  /* C */
-                    if(!(whiteport & 0x01)) white_count4[3]++;  /* D */
-                }
-                else
-                {
-                    if(whiteport & 0x10) white_count4[0]++;  /* A */
-                    if(whiteport & 0x04) white_count4[1]++;  /* B */
-                    if(whiteport & 0x40) white_count4[2]++;  /* C */
-                    if(whiteport & 0x01) white_count4[3]++;  /* D */   
-                }
-
-                if(adc_values[0]>previousMedian0)
-                    alt1_count++;
-                if(adc_values[1]>previousMedian1)
-                    alt2_count++;
+                adc_count[b]+=adc_values[b];
+                adc_count_samples++;
             }
-            else /* Over 200 */
+
+            /* If this is the first sample */
+            if(processedSampleCount==1)
             {
-                /* Mean, Min, Max */
-                for(int b=4;b<8;b++)
-                {
-                    adc_count[b]+=adc_values[b];
-                    adc_count_samples++;
-                }
-
-                isrtemp0=adc_values[0];
-                isrtemp1=adc_values[1];
-                isrtemp2=adc_values[2];
-                isrtemp3=adc_values[3];
-
-                /* If the value is outside of the window */
-                if(isrtemp0>MEDIAN_MAX)
-                    isrtemp0=FREQ_WINDOW-1;
-                else
-                {
-                    if(isrtemp0<MEDIAN_MIN)
-                        isrtemp0=0;
-                    else
-                        isrtemp0-=MEDIAN_MIN;
-                }
-
-                /* If the value is outside of the window */
-                if(isrtemp1>MEDIAN_MAX)
-                    isrtemp1=FREQ_WINDOW-1;
-                else
-                {
-                    if(isrtemp1<MEDIAN_MIN)
-                        isrtemp1=0;
-                    else
-                        isrtemp1-=MEDIAN_MIN;
-                }
-
-                /* If the value is outside of the window */
-                if(isrtemp2>MEDIAN_MAX)
-                    isrtemp2=FREQ_WINDOW-1;
-                else
-                {
-                    if(isrtemp2<MEDIAN_MIN)
-                        isrtemp2=0;
-                    else
-                        isrtemp2-=MEDIAN_MIN;
-                }
-
-                /* If the value is outside of the window */
-                if(isrtemp3>MEDIAN_MAX)
-                    isrtemp3=FREQ_WINDOW-1;
-                else
-                {
-                    if(isrtemp3<MEDIAN_MIN)
-                        isrtemp3=0;
-                    else
-                        isrtemp3-=MEDIAN_MIN;
-                }
-
-                stream0_freq[isrtemp0]++;
-                stream1_freq[isrtemp1]++;
-                stream2_freq[isrtemp2]++;
-                stream3_freq[isrtemp3]++;
+                first_raw[0]=adc_values[0];
+                first_raw[1]=adc_values[1];
+                first_raw[2]=adc_values[2];
+                first_raw[3]=adc_values[3];
             }
+
+            /* Count ones */
+            /* Data Step 2 */
+            if(whiteport & 0x20) white_count2[0]++;
+            if(whiteport & 0x10) white_count2[1]++;
+            if(whiteport & 0x08) white_count2[2]++;
+            if(whiteport & 0x04) white_count2[3]++;
+            if(whiteport & 0x80) white_count2[4]++;
+            if(whiteport & 0x40) white_count2[5]++;
+            if(whiteport & 0x02) white_count2[6]++;
+            if(whiteport & 0x01) white_count2[7]++;
+
+            /* XOR Bits */
+            /* Step 2 */
+            whiteport ^=(whiteport>>1);
+
+            /* Step 3 is implied since the data was read at a 10,000 sps rate */
+
+            /* Count ones */
+            /* Data Step 3 */
+            if(whiteport & 0x10) white_count3[0]++;  /* A */
+            if(whiteport & 0x04) white_count3[1]++;  /* B */
+            if(whiteport & 0x40) white_count3[2]++;  /* C */
+            if(whiteport & 0x01) white_count3[3]++;  /* D */
+
+            /* Count ones in xor alt sequence */
+            /* Data Step 4 */
+            if(processedSampleCount&1)
+            {
+                if(!(whiteport & 0x10)) white_count4[0]++;  /* A */
+                if(!(whiteport & 0x04)) white_count4[1]++;  /* B */
+                if(!(whiteport & 0x40)) white_count4[2]++;  /* C */
+                if(!(whiteport & 0x01)) white_count4[3]++;  /* D */
+            }
+            else
+            {
+                if(whiteport & 0x10) white_count4[0]++;  /* A */
+                if(whiteport & 0x04) white_count4[1]++;  /* B */
+                if(whiteport & 0x40) white_count4[2]++;  /* C */
+                if(whiteport & 0x01) white_count4[3]++;  /* D */   
+            }
+
+            if(adc_values[0]>previousMedian0)
+                alt1_count++;
+            if(adc_values[1]>previousMedian1)
+                alt2_count++;
+        }
+
+        /* Mean, Min, Max */
+        for(int b=4;b<8;b++)
+        {
+            adc_count[b]+=adc_values[b];
+            adc_count_samples++;
+        }
+
+        isrtemp0=adc_values[0];
+        isrtemp1=adc_values[1];
+        isrtemp2=adc_values[2];
+        isrtemp3=adc_values[3];
+
+        /* If the value is outside of the window */
+        if(isrtemp0>MEDIAN_MAX)
+            isrtemp0=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp0<MEDIAN_MIN)
+                isrtemp0=0;
+            else
+                isrtemp0-=MEDIAN_MIN;
+        }
+
+        /* If the value is outside of the window */
+        if(isrtemp1>MEDIAN_MAX)
+            isrtemp1=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp1<MEDIAN_MIN)
+                isrtemp1=0;
+            else
+                isrtemp1-=MEDIAN_MIN;
+        }
+
+        /* If the value is outside of the window */
+        if(isrtemp2>MEDIAN_MAX)
+            isrtemp2=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp2<MEDIAN_MIN)
+                isrtemp2=0;
+            else
+                isrtemp2-=MEDIAN_MIN;
+        }
+
+        /* If the value is outside of the window */
+        if(isrtemp3>MEDIAN_MAX)
+            isrtemp3=FREQ_WINDOW-1;
+        else
+        {
+            if(isrtemp3<MEDIAN_MIN)
+                isrtemp3=0;
+            else
+                isrtemp3-=MEDIAN_MIN;
+        }
+
+        stream0_freq[isrtemp0]++;
+        stream1_freq[isrtemp1]++;
+        stream2_freq[isrtemp2]++;
+        stream3_freq[isrtemp3]++;
 
         /* First Sample of Second */
         if(processedSampleCount <= 1)
@@ -622,8 +620,8 @@ static void process_samples(void)
         variance[7]=((unsigned int)Svar[7])/2499;
         
         Svar[0]=Svar[1]=Svar[2]=Svar[3]=Svar[4]=Svar[5]=Svar[6]=Svar[7]=0;
-        previousMedian0 = medianValue0;
-        previousMedian1 = medianValue1;
+        previousMedian0 = medianValue0>>1;
+        previousMedian1 = medianValue1>>1;
     }
     //gpio_set(LED_PORT,LED_PIN);
 }
@@ -931,40 +929,72 @@ int main(void)
             for(k = 0; k < FREQ_WINDOW;k++)
             {
                 temp+=stream0_freq[k];
-                if(temp>5000)
+                if(temp>4999)
                 {
-                    medianValue0=k+MEDIAN_MIN;
+                    medianValue0=(k+MEDIAN_MIN) << 1;
                     break;
+                }
+                else
+                {
+                    if(temp==4999)
+                    {
+                        medianValue0=((k+MEDIAN_MIN) << 1)+1;
+                        break;       
+                    }
                 }
             }
             temp=0;
             for(k = 0; k < FREQ_WINDOW;k++)
             {
                 temp+=stream1_freq[k];
-                if(temp>5000)
+                if(temp>4999)
                 {
-                    medianValue1=k+MEDIAN_MIN;
+                    medianValue1=(k+MEDIAN_MIN) << 1;
                     break;
+                }
+                else
+                {
+                    if(temp==4999)
+                    {
+                        medianValue1=((k+MEDIAN_MIN) << 1)+1;
+                        break;       
+                    }
                 }
             }
             temp=0;
             for(k = 0; k < FREQ_WINDOW;k++)
             {
                 temp+=stream2_freq[k];
-                if(temp>5000)
+                if(temp>4999)
                 {
-                    medianValue2=k+MEDIAN_MIN;
+                    medianValue2=(k+MEDIAN_MIN) << 1;
                     break;
+                }
+                else
+                {
+                    if(temp==4999)
+                    {
+                        medianValue2=((k+MEDIAN_MIN) << 1)+1;
+                        break;       
+                    }
                 }
             }
             temp=0;
             for(k = 0; k < FREQ_WINDOW;k++)
             {
                 temp+=stream3_freq[k];
-                if(temp>5000)
+                if(temp>4999)
                 {
-                    medianValue3=k+MEDIAN_MIN;
+                    medianValue3=(k+MEDIAN_MIN) << 1;
                     break;
+                }
+                else
+                {
+                    if(temp==4999)
+                    {
+                        medianValue3=((k+MEDIAN_MIN) << 1)+1;
+                        break;       
+                    }
                 }
             }
 

@@ -167,6 +167,7 @@ volatile unsigned int isrtemp0=0;
 volatile unsigned int isrtemp1=0;
 volatile unsigned int isrtemp2=0;
 volatile unsigned int isrtemp3=0;
+volatile unsigned int isrtempwhite=0;
 volatile unsigned int sampleCounter=0;
 
 #define SAMPLE_BUFFER_SIZE      128
@@ -330,10 +331,20 @@ void tim2_isr(void)
     adc_start_conversion_regular(ADC1);
     
     sampleCounter++;
- 
+
     /* Increment input pointer and save to circular buffer */
     sampleBufferInPtr=(sampleBufferInPtr+1)&SAMPLE_BUFFER_MASK;
-    whitebuffer[sampleBufferInPtr]=(gpio_port_read(GPIOB) >> 8);
+
+    isrtempwhite=gpio_port_read(GPIOB);
+ 
+#if ORIGINAL_HW
+
+    whitebuffer[sampleBufferInPtr]=(isrtempwhite >> 8);
+#else
+
+    whitebuffer[sampleBufferInPtr]=((isrtempwhite >> 8) & 0xfb) | (isrtempwhite & 0x20)>>3;
+
+#endif
 
     samplebuffer0[sampleBufferInPtr]=adc_tempval[0];
     samplebuffer1[sampleBufferInPtr]=adc_tempval[1];
@@ -343,6 +354,7 @@ void tim2_isr(void)
     samplebuffer5[sampleBufferInPtr]=adc_tempval[4];
     samplebuffer6[sampleBufferInPtr]=adc_tempval[5];
     samplebuffer7[sampleBufferInPtr]=adc_tempval[6];
+
 
 }
 
@@ -669,7 +681,7 @@ static void clock_gpio_setup(void)
 
     gpio_mode_setup(GPIOB, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 );
 
-    gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8 | GPIO9 | \
+    gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO5 | GPIO8 | GPIO9 | \
                      GPIO10 | GPIO11 | GPIO12 | GPIO13 | GPIO14 | GPIO15);
     gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_PIN);
     gpio_mode_setup(USART_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, USART_TXPIN);

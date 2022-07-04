@@ -61,7 +61,8 @@ flash: default
 
 	# Write Option Bytes (sets up BOOT0, RESET pins, etc.)
 	#$(SF) --area=option write 0xdeffe1aa
-	$(SF) --area=option write 0xdaffffaa
+	#$(SF) --area=option write 0xdaffffaa
+	$(SF) --area=option write 0xcaffffaa
 
 	# Write to FLASH
 	$(SF) write $(TARGET).bin 0x8000000

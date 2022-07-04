@@ -872,7 +872,7 @@ int main(void)
     }
 
     /* Wait for power to settle down */
-    delay_ms(100);
+    delay_ms(500);
 
     clock_gpio_setup();
     adc_setup();
@@ -894,8 +894,6 @@ int main(void)
             read_temp();
 
             //current_temp=0xEFBE;
-
-#if PACKED_OUTPUT   
 
             /* TEMP1 */
             usart_send_blocking(USART1,(current_temp & 0xff));        /* 01 */
@@ -1019,126 +1017,10 @@ int main(void)
             usart_send_blocking(USART1,white_count4_out[0] & 0xff);        
             usart_send_blocking(USART1,white_count4_out[1] & 0xff);        
             usart_send_blocking(USART1,white_count4_out[2] & 0xff);        
-            //usart_send_blocking(USART1,white_count4[3] & 0xff);        
+            usart_send_blocking(USART1,white_count4_out[3] & 0xff);        
         
             /* XOR_GT_MEDIANS */ /* 83 */
-            //usart_send_blocking(USART1,(alt1_count_out ^ alt2_count_out) & 0xff);       
-
-#else
-
-            usart_print_string("=================\n Temp   ");     
-
-            signed_temp=current_temp;
-
-            /* Check sign and do twos compliment if needed */
-            if(signed_temp & 0x800)
-            {
-                usart_send_blocking(USART1,'-');
-                signed_temp=(signed_temp ^ 0xFFF)+1;            
-            }
-
-            bcdtemp=binary_to_bcd(signed_temp>>2);
-            fractemp=signed_temp & 0x7;
-
-            k&=7;
-            usart_send_blocking(USART1,((bcdtemp>>8)&0xf) + 0x30);
-            usart_send_blocking(USART1,((bcdtemp>>4)&0xf) + 0x30);
-            usart_send_blocking(USART1,((bcdtemp)&0xf) + 0x30);
-            usart_send_blocking(USART1,'.');
-            usart_send_blocking(USART1,bin_to_eighths[fractemp][0]);
-            usart_send_blocking(USART1,bin_to_eighths[fractemp][1]);
-            usart_send_blocking(USART1,bin_to_eighths[fractemp][2]);
-            usart_print_string("C ");    
-
-            usart_print_string("\n Count  "); 
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>28)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>24)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>20)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>16)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>12)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>8)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter>>4)&0xf]);
-            usart_send_blocking(USART1,nibble_to_hex[(adc_int_counter)&0xf]);
-            
-
-            usart_print_string("\n Samp   "); 
-            usart_print_hex(endSampleNumberPrev);
-
-            usart_print_string("\n Means  ");     
-            for(int j = 0 ;j<8;j++)
-            {
-
-                tempval[j]=adc_count_out[j] / 10000;
-
-                usart_print_2bytes(tempval[j]);
-
-                if(adc_int_counter>0x30000)
-                {
-                    if(tempval[j]>maximum)
-                        maximum=tempval[j];
-                    if(tempval[j]<minimum)
-                        minimum=tempval[j];
-                }
-            }
-
-            usart_print_string("\n Vari   ");    
-            for(int j=0;j<8;j++)
-                usart_print_hex(variance[j]);
-
-            usart_print_string("\n MeanMx ");     
-            usart_print_2bytes(maximum);
-            usart_print_string("\n MeanMn ");     
-            usart_print_2bytes(minimum);
-
-            usart_print_string("\n Median ");  
-            temp=0;
-            for(k = 0; k < FREQ_WINDOW;k++)
-            {
-                temp+=stream0_freq[k];
-                if(temp>5000)
-                {
-                    medianValue0=k+MEDIAN_MIN;
-                    break;
-                }
-            }
-            temp=0;
-            for(k = 0; k < FREQ_WINDOW;k++)
-            {
-                temp+=stream1_freq[k];
-                if(temp>5000)
-                {
-                    medianValue1=k+MEDIAN_MIN;
-                    break;
-                }
-            }
-
-            /* Reset Median Frequency Arrays */
-            for(int k=0;k<(FREQ_WINDOW);k++)
-                stream0_freq[k]=stream1_freq[k]=0;
-
-
-            usart_print_2bytes(medianValue0);
-            usart_print_2bytes(medianValue1);
-
-
-            usart_print_string("\n w2     ");    
-            for(int j = 0 ;j<8;j++)
-            {
-                usart_print_byte(white_count2_out[j]);
-            }
-            
-            usart_print_string("\n w3     ");    
-            for(int j = 0 ;j<4;j++)
-            {
-                usart_print_byte(white_count3_out[j]);
-            }
-
-            usart_print_string("\n Alt    ");    
-            usart_print_byte(alt1_count_out);
-            usart_print_byte(alt2_count_out);
-            usart_print_byte(alt1_count_out ^ alt2_count_out);
-            usart_send_blocking(USART1,'\n'); 
-#endif
+            usart_send_blocking(USART1,(alt1_count_out ^ alt2_count_out) & 0xff);       
 
             gpio_set(LED_PORT,LED_PIN);
         }

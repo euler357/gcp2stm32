@@ -22,7 +22,7 @@
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
 #define PACKED_OUTPUT   1
-#define ORIGINAL_HW     0
+#define ORIGINAL_HW     1
 
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
@@ -37,7 +37,6 @@
 /* Sync Pin */
 #define SYNC_PORT   GPIOA
 #define SYNC_PIN    GPIO11
-
 
 #if ORIGINAL_HW
 
@@ -437,10 +436,8 @@ static void process_samples(void)
                 if(whiteport & 0x01) white_count4[3]++;  /* D */   
             }
 
-            if(adc_values[0]>previousMedian0)
+            if((adc_values[0]>previousMedian0) ^ (adc_values[1]>previousMedian1))
                 alt1_count++;
-            if(adc_values[1]>previousMedian1)
-                alt2_count++;
         }
 
         /* Mean, Min, Max */
@@ -588,7 +585,6 @@ static void process_samples(void)
         }
 
     }
-
 
     if(processedSampleCount>=endSampleNumber)
     {
@@ -1062,7 +1058,7 @@ int main(void)
             usart_send_blocking(USART1,white_count4_out[3] & 0xff);        
         
             /* XOR_GT_MEDIANS */ /* 83 */
-            usart_send_blocking(USART1,(alt1_count_out ^ alt2_count_out) & 0xff);       
+            usart_send_blocking(USART1,(alt1_count_out) & 0xff);       
 
             gpio_set(LED_PORT,LED_PIN);
         }

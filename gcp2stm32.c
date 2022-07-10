@@ -21,8 +21,7 @@
 #define delay(cycles)               for (int i = 0; i < cycles; i++) __asm__("nop")
 #define delay_ms(milliseconds)      for (int i = 0; i < (milliseconds*6000); i++) __asm__("nop")
 
-#define PACKED_OUTPUT   1
-#define ORIGINAL_HW     1
+#define ORIGINAL_HW     0
 
 /* USART TX on PA9, USART RX on PA10 */
 #define USART_PORT  GPIOA 
